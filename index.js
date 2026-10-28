@@ -62,7 +62,9 @@
 
   /* ---------- 千问写提示词 ---------- */
   async function qwenPrompts(text, n) {
-    if (!S.key) throw new Error('先填 RunningHub API Key');
+    const key = await pickKey();
+    if (!key) throw new Error('没填 Key，也没导入账号：先填 RunningHub Key 或在「账号」里导入');
+
     const sys = [
       '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成 ' + n + ' 张“故事插图”的英文出图提示词。',
       '规则：',
@@ -76,7 +78,7 @@
     const user = '画风要求：' + (STYLES[S.style] || STYLES.anime) + '\n张数：' + n + '\n\n正文：\n"""\n' + text + '\n"""';
     const r = await fetch(api('/v1/chat/completions'), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + S.key },
+      headers: Object.assign({ 'Content-Type': 'application/json' }, key ? { Authorization: 'Bearer ' + key } : {}),
       body: JSON.stringify({ model: 'qwen27b-q4', stream: false, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] }),
     });
     const j = await r.json().catch(() => ({}));
@@ -229,6 +231,66 @@
       () => status('err', '复制失败'));
   }
 
+  async function pickKey() {
+    if (S.key) return S.key;
+    const sel = $('#h3s2i-acc');
+    const nick = sel ? sel.value : '';
+    if (!nick) return '';
+    try {
+      const r = await fetch(api('/api/accounts/export'));
+      const j = await r.json();
+      const hit = (j.accounts || []).find((a) => String(a.nick || '') === nick);
+      return hit ? String(hit.apiKey || '') : '';
+    } catch (_) { return ''; }
+  }
+
+  /* ---------- 账号：列表 / 导入 / 选择 ---------- */
+  async function loadAccList() {
+    const sel = $('#h3s2i-acc');
+    if (!sel) return;
+    const keep = sel.value;
+    try {
+      const j = await (await fetch(api('/api/accounts'))).json();
+      const list = j.accounts || [];
+      sel.innerHTML = '<option value="">（用上面的 Key / 服务端账号池）</option>' + list.map((a, i) =>
+        '<option value="' + esc(a.nick || ('账号' + (i + 1))) + '">' + esc((a.nick || '账号' + (i + 1)) + ' · …' + (a.keyTail || '') + ' · 并发' + (a.maxConc || 1)) + '</option>'
+      ).join('');
+      if (keep) sel.value = keep;
+      const hint = $('#h3s2i-accHint');
+      if (hint) hint.textContent = list.length ? ('服务端已有 ' + list.length + ' 个账号') : '服务端还没有账号，先导入';
+    } catch (e) {
+      const hint = $('#h3s2i-accHint');
+      if (hint) hint.textContent = '读账号失败：' + (e.message || e);
+    }
+  }
+
+  function toggleAccBox() {
+    const box = $('#h3s2i-accBox');
+    if (!box) return;
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+  }
+
+  async function importAcc() {
+    const ta = $('#h3s2i-accJson');
+    const raw = (ta && ta.value || '').trim();
+    if (!raw) { status('err', '先把导出的账号 JSON 粘进去'); return; }
+    let j = null;
+    try { j = JSON.parse(raw); } catch (_) { status('err', 'JSON 格式不对'); return; }
+    if (!j.accounts && Array.isArray(j)) j = { accounts: j };
+    if (!j.accounts || !j.accounts.length) { status('err', '里面没有 accounts 数组'); return; }
+    status('run', '导入 ' + j.accounts.length + ' 个账号…');
+    try {
+      const r = await fetch(api('/api/accounts/import'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(j),
+      });
+      const res = await r.json();
+      if (!res.ok) throw new Error(res.error || '导入失败');
+      status('ok', '导入完成：新增 ' + (res.added || 0) + '，更新 ' + (res.updated || 0) + '，共 ' + (res.total || 0));
+      if (ta) ta.value = '';
+      await loadAccList();
+    } catch (e) { status('err', '导入失败：' + (e.message || e)); }
+  }
+
   function openPanel() {
     const d = $('#h3s2i-dlg');
     if (!d) return;
@@ -251,7 +313,20 @@
       <header><b>正文配图</b><span class="sub">正文 → 千问27B Q4 写分镜 → Krea2 并发出图</span><button id="h3s2i-x" title="关闭">✕</button></header>
       <div class="body">
         <div class="row"><label>H3 地址</label><input id="h3s2i-host" placeholder="http://127.0.0.1:8899">
-          <label class="w">Key</label><input id="h3s2i-key" type="password" placeholder="RunningHub API Key（只存本机）">
+          <label class="w">Key</label><input id="h3s2i-key" type="password" placeholder="留空 = 用服务端账号池">
+        </div>
+        <div class="row"><label>账号</label>
+          <select id="h3s2i-acc" class="grow"><option value="">（用上面的 Key / 服务端账号池）</option></select>
+          <button id="h3s2i-accReload" title="刷新账号列表">↻</button>
+          <button id="h3s2i-accOpen">导入账号</button>
+        </div>
+        <div id="h3s2i-accBox" style="display:none;margin:0 0 9px">
+          <textarea id="h3s2i-accJson" placeholder='把 H3工作台「导出账号」得到的 JSON 粘这里，例如：
+{"ok":true,"version":1,"accounts":[{"nick":"账号1","apiKey":"...","comfyAuth":"...","accessToken":"...","maxConc":1,"prio":0}]}' style="min-height:96px"></textarea>
+          <div class="row" style="margin-top:6px">
+            <button id="h3s2i-accImport" class="primary">导入到服务端</button>
+            <span class="hint" id="h3s2i-accHint" style="margin:0">导入后账号会存进 8899 的 accounts.json，出图/千问都能直接用</span>
+          </div>
         </div>
         <div class="row"><label>楼层</label><select id="h3s2i-floor"></select><button id="h3s2i-refl" title="刷新楼层">↻</button></div>
         <div class="row"><label>张数</label><input id="h3s2i-count" type="number" min="1" max="8" value="4">
@@ -339,6 +414,10 @@
     $('#h3s2i-aspect').onchange = (e) => { S.aspect = e.target.value; saveS(); };
     $('#h3s2i-conc').onchange = (e) => { S.conc = Number(e.target.value) || 3; saveS(); };
     $('#h3s2i-refl').onclick = fillFloors;
+    $('#h3s2i-accReload').onclick = loadAccList;
+    $('#h3s2i-accOpen').onclick = toggleAccBox;
+    $('#h3s2i-accImport').onclick = importAcc;
+    try { loadAccList(); } catch (_) {}
     $('#h3s2i-go').onclick = genPrompts;
     $('#h3s2i-imgs').onclick = genImages;
     $('#h3s2i-stop').onclick = () => { STOP = true; status('err', '已停止（已提交的仍会跑完）'); };
