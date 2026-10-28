@@ -279,6 +279,58 @@
     $('#h3s2i-aspect').value = S.aspect; $('#h3s2i-conc').value = S.conc;
 
     fab.onclick = openPanel;
+    // 手机：贴右下角，避免被输入栏挡住
+    try {
+      if (window.innerWidth < 700) {
+        fab.style.bottom = '104px';
+        fab.style.right = '12px';
+        fab.style.width = '42px';
+        fab.style.height = '42px';
+      }
+    } catch (_) {}
+
+    // 顶栏图标入口（最可靠：酒馆顶部图标条里加一个，不受 fixed 定位影响）
+    try {
+      const bar = document.querySelector('#top-settings-holder');
+      if (bar && !document.querySelector('#h3s2i-topbtn')) {
+        const tb = document.createElement('div');
+        tb.id = 'h3s2i-topbtn';
+        tb.className = 'drawer-icon fa-solid fa-image interactable';
+        tb.title = '正文配图（正文 → 千问27B → Krea2）';
+        tb.tabIndex = 0;
+        tb.style.cssText = 'cursor:pointer';
+        tb.onclick = openPanel;
+        bar.appendChild(tb);
+      }
+    } catch (e) { console.warn('[h3s2i] top btn fail', e); }
+
+    // 悬浮球如果被页面布局挤到屏幕外，就藏起来，用顶栏图标开
+    try {
+      const r0 = fab.getBoundingClientRect();
+      if (r0.top < 0 || r0.left < 0 || r0.top > window.innerHeight) fab.style.display = 'none';
+    } catch (_) {}
+
+    // 同时在「扩展设置」里挂一个抽屉入口（悬浮球被挡时也能开）
+    try {
+      const host = document.querySelector('#extensions_settings') || document.querySelector('#extensions_settings2');
+      if (host && !document.querySelector('#h3s2i-drawer')) {
+        const wrap = document.createElement('div');
+        wrap.id = 'h3s2i-drawer';
+        wrap.innerHTML = '<div class="inline-drawer" style="margin-bottom:6px">'
+          + '<div class="inline-drawer-toggle inline-drawer-header" style="cursor:pointer"><b>正文配图</b>'
+          + '<span class="hint" style="margin-left:8px;color:#8b98ab;font-size:12px">千问27B 写分镜 → Krea2 出图</span>'
+          + '<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div></div>'
+          + '<div class="inline-drawer-content" style="display:none">'
+          + '<button id="h3s2i-open" class="menu_button" style="margin:6px 0">打开正文配图</button>'
+          + '<div class="hint" style="font-size:12px;color:#8b98ab">H3 地址默认 http://127.0.0.1:8899；Key 填 RunningHub 的</div>'
+          + '</div></div>';
+        host.appendChild(wrap);
+        const head = wrap.querySelector('.inline-drawer-header');
+        const content = wrap.querySelector('.inline-drawer-content');
+        head.onclick = () => { content.style.display = content.style.display === 'none' ? 'block' : 'none'; };
+        wrap.querySelector('#h3s2i-open').onclick = openPanel;
+      }
+    } catch (e) { console.warn('[h3s2i] settings entry fail', e); }
     $('#h3s2i-x').onclick = () => (d.close ? d.close() : d.removeAttribute('open'));
     $('#h3s2i-host').onchange = (e) => { S.host = e.target.value.trim() || DEFA.host; saveS(); };
     $('#h3s2i-key').onchange = (e) => { S.key = e.target.value.trim(); saveS(); };
@@ -295,8 +347,17 @@
   }
 
   function boot() {
-    try { build(); console.log('[h3s2i] booted'); }
-    catch (e) { console.error('[h3s2i] boot fail', e); }
+    try { build(); window.__h3s2i = true; console.log('[h3s2i] booted v' + '1.2.0'); }
+    catch (e) {
+      console.error('[h3s2i] boot fail', e);
+      try {
+        const d = document.createElement('div');
+        d.style.cssText = 'position:fixed;left:8px;right:8px;bottom:8px;z-index:10000;background:#7f1d1d;color:#fff;padding:8px 10px;border-radius:8px;font-size:12px';
+        d.textContent = '[正文配图] 加载失败：' + (e && e.message ? e.message : e);
+        document.body.appendChild(d);
+        setTimeout(() => d.remove(), 15000);
+      } catch (_) {}
+    }
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(boot, 1200));
