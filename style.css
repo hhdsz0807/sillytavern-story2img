@@ -19,15 +19,15 @@
 #h3s2i-dlg header .sub{color:#7f8ea3;font-size:12px;}
 #h3s2i-dlg header button{margin-left:auto;background:none;border:0;color:#9aa8ba;font-size:16px;cursor:pointer;}
 #h3s2i-dlg .body{padding:12px 14px;overflow:auto;max-height:calc(88vh - 46px);}
-#h3s2i-dlg .row{display:flex;align-items:center;gap:8px;margin:0 0 9px;}
+#h3s2i-dlg .row{display:flex;align-items:center;gap:8px;margin:0 0 9px;flex-wrap:wrap;}
 #h3s2i-dlg .row label{min-width:58px;color:#8b98ab;}
-#h3s2i-dlg .row label.w{min-width:auto;margin-left:6px;}
+#h3s2i-dlg .row label.w{min-width:auto;margin-left:6px;}\n#h3s2i-dlg .row input{max-width:100%;}\n@media (max-width:520px){\n  #h3s2i-dlg{width:96vw;}\n  #h3s2i-dlg .row label{min-width:52px;}\n  #h3s2i-dlg .row input:not([type=number]){flex:1 1 100%;}\n  #h3s2i-dlg .row button{flex:none;}\n}
 #h3s2i-dlg input,#h3s2i-dlg select,#h3s2i-dlg textarea{
   background:#0b1017;border:1px solid #2b3646;border-radius:8px;color:#d7dee9;padding:7px 9px;font-size:13px;
 }
 #h3s2i-dlg input[type=number]{width:66px;}
 #h3s2i-dlg select{min-width:104px;}
-#h3s2i-dlg .row input:not([type=number]){flex:1;}
+#h3s2i-dlg .row input:not([type=number]){flex:1;min-width:0;}
 #h3s2i-dlg textarea{
   width:100%;min-height:132px;resize:vertical;font-family:ui-monospace,Consolas,monospace;line-height:1.55;
 }

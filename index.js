@@ -62,8 +62,7 @@
 
   /* ---------- 千问写提示词 ---------- */
   async function qwenPrompts(text, n) {
-    const key = await pickKey();
-    if (!key) throw new Error('没填 Key，也没导入账号：先填 RunningHub Key 或在「账号」里导入');
+    const key = await pickKey();   // 可能是空串：空就不带头，服务端会用账号池里的第一个 key
 
     const sys = [
       '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成 ' + n + ' 张“故事插图”的英文出图提示词。',
