@@ -7,10 +7,22 @@
 (function () {
   'use strict';
 
-  const LS = 'h3s2i.settings.v1';
-  const DEFA = { host: 'http://127.0.0.1:8899', key: '', count: 4, style: 'anime', aspect: '16:9 (Widescreen)', mp: 1.5, conc: 3 };
+  const LS = 'h3s2i.settings.v2';
+  const LS_OLD = 'h3s2i.settings.v1';
+  const DEFA = { host: 'http://127.0.0.1:8899', key: '', count: '', style: 'anime', aspect: '16:9 (Widescreen)', mp: 1.5, conc: 3 };
   let S = Object.assign({}, DEFA);
-  try { S = Object.assign(S, JSON.parse(localStorage.getItem(LS) || '{}')); } catch (_) {}
+  try {
+    // 老版本设置迁移：host/key/画风/画幅/并发继承，张数一律回到「自动」
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(LS) || 'null'); } catch (_) {}
+    if (!saved) {
+      try {
+        const oldCfg = JSON.parse(localStorage.getItem(LS_OLD) || 'null');
+        if (oldCfg) saved = { host: oldCfg.host, key: oldCfg.key, style: oldCfg.style, aspect: oldCfg.aspect, mp: oldCfg.mp, conc: oldCfg.conc, count: '' };
+      } catch (_) {}
+    }
+    if (saved) S = Object.assign(S, saved);
+  } catch (_) {}
   function saveS() { try { localStorage.setItem(LS, JSON.stringify(S)); } catch (_) {} }
 
   const STYLES = {
@@ -64,8 +76,12 @@
   async function qwenPrompts(text, n) {
     const key = await pickKey();   // 可能是空串：空就不带头，服务端会用账号池里的第一个 key
 
+    const head = n
+      ? ('用户指定了 ' + n + ' 张，必须正好输出 ' + n + ' 行。')
+      : '张数由你决定：按正文的场景/关键动作切分，判断需要几张图才能把这段故事讲清楚（1–8 张，宁可少而准，不要为了凑数拆碎剧情）。';
     const sys = [
-      '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成 ' + n + ' 张“故事插图”的英文出图提示词。',
+      '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成若干故事插图的英文出图提示词。',
+      head,
       '规则：',
       '1) 每行一条提示词，纯文本，不要编号、不要解释、不要代码块。',
       '2) 画面必须有角色（这是故事插图，不是空场景），按正文时间顺序覆盖关键情节。',
@@ -88,7 +104,7 @@
       .map((l) => l.trim().replace(/^[-*•\d.、)\s]+/, '').replace(/^["“]|["”]$/g, '').trim())
       .filter((l) => l.length > 20);
     if (!lines.length) throw new Error('模型没给出可用提示词');
-    return lines.slice(0, n);
+    return lines.slice(0, n || 8);
   }
 
   /* ---------- Krea2 出图 ---------- */
@@ -170,8 +186,9 @@
   async function genPrompts() {
     const text = storyText();
     if (!text) { status('err', '这条楼层没抽到正文'); return; }
-    const n = Math.max(1, Math.min(8, Number($('#h3s2i-count').value) || 4));
-    status('run', '千问27B 正在写 ' + n + ' 条分镜提示词…（20–90 秒）');
+    const rawCnt = $('#h3s2i-count').value;
+    const n = rawCnt === '' ? 0 : Math.max(1, Math.min(8, Number(rawCnt) || 4));   // 0 = 让模型自己定
+    status('run', n ? ('千问27B 正在写 ' + n + ' 条分镜提示词…（20–90 秒）') : '千问27B 正在判断要画几张并写分镜…（20–90 秒）');
     $('#h3s2i-go').disabled = true;
     try {
       const lines = await qwenPrompts(text, n);
@@ -328,7 +345,7 @@
           </div>
         </div>
         <div class="row"><label>楼层</label><select id="h3s2i-floor"></select><button id="h3s2i-refl" title="刷新楼层">↻</button></div>
-        <div class="row"><label>张数</label><input id="h3s2i-count" type="number" min="1" max="8" value="4">
+        <div class="row"><label>张数</label><select id="h3s2i-count" title="自动 = 由模型按正文决定画几张"><option value="">自动（模型判断）</option><option value="1">1 张</option><option value="2">2 张</option><option value="3">3 张</option><option value="4">4 张</option><option value="5">5 张</option><option value="6">6 张</option><option value="7">7 张</option><option value="8">8 张</option></select>
           <label class="w">画风</label><select id="h3s2i-style">
             <option value="anime">动漫</option><option value="photo">写实摄影</option>
             <option value="film">电影感</option><option value="illust">插画</option>
@@ -349,7 +366,7 @@
     document.body.appendChild(d);
 
     $('#h3s2i-host').value = S.host; $('#h3s2i-key').value = S.key;
-    $('#h3s2i-count').value = S.count; $('#h3s2i-style').value = S.style;
+    document.querySelector('#h3s2i-count').value = (S.count === '' || S.count == null) ? '' : String(S.count); document.querySelector('#h3s2i-style').value = S.style;
     $('#h3s2i-aspect').value = S.aspect; $('#h3s2i-conc').value = S.conc;
 
     fab.onclick = openPanel;
@@ -408,7 +425,7 @@
     $('#h3s2i-x').onclick = () => (d.close ? d.close() : d.removeAttribute('open'));
     $('#h3s2i-host').onchange = (e) => { S.host = e.target.value.trim() || DEFA.host; saveS(); };
     $('#h3s2i-key').onchange = (e) => { S.key = e.target.value.trim(); saveS(); };
-    $('#h3s2i-count').onchange = (e) => { S.count = Number(e.target.value) || 4; saveS(); };
+    document.querySelector('#h3s2i-count').onchange = (e) => { S.count = e.target.value === '' ? '' : Number(e.target.value); saveS(); };
     $('#h3s2i-style').onchange = (e) => { S.style = e.target.value; saveS(); };
     $('#h3s2i-aspect').onchange = (e) => { S.aspect = e.target.value; saveS(); };
     $('#h3s2i-conc').onchange = (e) => { S.conc = Number(e.target.value) || 3; saveS(); };
