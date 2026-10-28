@@ -73,24 +73,39 @@
   }
 
   /* ---------- 千问写提示词 ---------- */
-  async function qwenPrompts(text, n) {
-    const key = await pickKey();   // 可能是空串：空就不带头，服务端会用账号池里的第一个 key
-
+  /* 把要发给千问的东西组装好（「看发给千问的」也用它，保证所见即所发） */
+  function buildPromptPack(text, n) {
     const head = n
       ? ('用户指定了 ' + n + ' 张，必须正好输出 ' + n + ' 行。')
       : '张数由你决定：按正文的场景/关键动作切分，判断需要几张图才能把这段故事讲清楚（1–8 张，宁可少而准，不要为了凑数拆碎剧情）。';
     const sys = [
-      '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成若干故事插图的英文出图提示词。',
+      '你是动画分镜师 + 出图提示词工程师。用户给你一段中文小说正文，你要把它拆成若干「故事插图」的英文出图提示词。',
       head,
       '规则：',
       '1) 每行一条提示词，纯文本，不要编号、不要解释、不要代码块。',
       '2) 画面必须有角色（这是故事插图，不是空场景），按正文时间顺序覆盖关键情节。',
-      '3) 角色用固定写法：年龄 + 发型发色 + 瞳色 + 衣着（第一次出现时写全，之后保持一致）。',
-      '4) 每条包含：谁在做什么（动作/表情） + 环境陈设 + 光线与时间 + 色调材质 + 镜头（wide shot / medium shot / close-up，35mm 之类）。',
-      '5) 不要出现文字、字幕、水印、UI、对话框。',
-      '6) 每条 50–80 个英文单词，信息密度高但不要堆砌形容词。',
+      '3) 角色写法固定：年龄 + 发型发色 + 瞳色 + 衣着（第一次写全，后面保持一致）。',
+      '4) 每行必须同时包含这 6 样，缺一不可：',
+      '   (a) 镜头：wide shot / medium shot / close-up / over-the-shoulder，加焦距（35mm / 50mm / 85mm）；',
+      '   (b) 主体：谁、什么姿态、什么表情、手在做什么；',
+      '   (c) 环境：3–6 个具体陈设（家具/道具/墙面/窗外），不要只写 room / scene；',
+      '   (d) 光线：光源方向 + 时间（如 afternoon sunlight from the left window）；',
+      '   (e) 色调与材质（如 warm beige, worn wood, dusty air）；',
+      '   (f) 氛围一句话。',
+      '5) 每行 60–90 个英文单词；宁可细节多，也不要写成一句概括。',
+      '6) 不要出现文字、字幕、水印、UI、对话框。',
+      '7) 参考样式（照这个密度写，不要照抄内容）：',
+      '   "Medium shot, 35mm lens. A teenage boy with messy black hair and tired brown eyes sits up on a thin futon in a cramped six-tatami room, one hand rubbing his temple. Yellowed plaster ceiling, stacked cardboard boxes with faded supermarket logos, a cheap folding fan on the floor. Hard afternoon sunlight slices through plastic blinds from the left, striping the tatami in warm amber and deep shadow. Dusty air, worn fabric textures, muted beige and gray palette. Quiet, disoriented mood."',
     ].join('\n');
-    const user = '画风要求：' + (STYLES[S.style] || STYLES.anime) + '\n张数：' + n + '\n\n正文：\n"""\n' + text + '\n"""';
+    const user = '画风要求：' + (STYLES[S.style] || STYLES.anime) + '\n张数：' + (n || '自动（你决定）') + '\n\n正文：\n"""\n' + text + '\n"""';
+    return { sys, user };
+  }
+
+  async function qwenPrompts(text, n) {
+    const key = await pickKey();   // 空串也行：服务端会用账号池
+    const pack = buildPromptPack(text, n);
+    const sys = pack.sys;
+    const user = pack.user;
     const r = await fetch(api('/v1/chat/completions'), {
       method: 'POST',
       headers: Object.assign({ 'Content-Type': 'application/json' }, key ? { Authorization: 'Bearer ' + key } : {}),
@@ -307,6 +322,46 @@
     } catch (e) { status('err', '导入失败：' + (e.message || e)); }
   }
 
+  /* ---------- 预览：正文 / 发给千问的全文 ---------- */
+  function showPeek(title, body) {
+    let d = document.getElementById('h3s2i-peekdlg');
+    if (!d) {
+      d = document.createElement('dialog');
+      d.id = 'h3s2i-peekdlg';
+      d.style.cssText = 'position:fixed;inset:0;margin:auto;width:min(900px,95vw);max-height:86vh;border:1px solid #2b3646;border-radius:12px;background:#0f141b;color:#d7dee9;padding:0;overflow:hidden;z-index:10001';
+      d.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#141b24;border-bottom:1px solid #232d3b">'
+        + '<b id="h3s2i-peekTitle" style="font-size:14px"></b>'
+        + '<span id="h3s2i-peekMeta" style="color:#7f8ea3;font-size:12px"></span>'
+        + '<button id="h3s2i-peekX" style="margin-left:auto;background:none;border:0;color:#9aa8ba;font-size:16px;cursor:pointer">✕</button></div>'
+        + '<textarea id="h3s2i-peekBody" readonly style="width:100%;height:calc(86vh - 92px);background:#0b1017;color:#d7dee9;border:0;padding:12px;font:12px/1.6 ui-monospace,Consolas,monospace;resize:none"></textarea>';
+      document.body.appendChild(d);
+      d.querySelector('#h3s2i-peekX').onclick = () => d.close();
+    }
+    d.querySelector('#h3s2i-peekTitle').textContent = title;
+    d.querySelector('#h3s2i-peekBody').value = body;
+    try { if (!d.open) d.showModal(); } catch (_) { d.setAttribute('open', ''); }
+    return d.querySelector('#h3s2i-peekMeta');
+  }
+
+  function peekStory() {
+    const text = storyText();
+    const sel = $('#h3s2i-floor');
+    const id = sel && sel.value ? ('#' + sel.value) : '最新一条';
+    const meta = showPeek('发给千问的正文', text || '（没抽到正文）');
+    meta.textContent = id + ' · ' + text.length + ' 字';
+  }
+
+  function peekQwen() {
+    const text = storyText();
+    if (!text) { status('err', '没抽到正文'); return; }
+    const raw = $('#h3s2i-count').value;
+    const n = raw === '' ? 0 : Math.max(1, Math.min(8, Number(raw) || 4));
+    const pack = buildPromptPack(text, n);
+    const meta = showPeek('真正发给千问的请求（system + user）',
+      '===== system =====\n' + pack.sys + '\n\n===== user =====\n' + pack.user);
+    meta.textContent = '正文 ' + text.length + ' 字 · system ' + pack.sys.length + ' 字 · user ' + pack.user.length + ' 字';
+  }
+
   function openPanel() {
     const d = $('#h3s2i-dlg');
     if (!d) return;
@@ -354,6 +409,9 @@
             <option>16:9 (Widescreen)</option><option>1:1 (Square)</option><option>9:16 (Portrait Widescreen)</option>
           </select>
           <label class="w">并发</label><input id="h3s2i-conc" type="number" min="1" max="6" value="3">
+        </div>
+        <div class="row"><button id="h3s2i-peek" title="查看本楼会被当成正文发送的内容">看正文</button>
+          <button id="h3s2i-peekq" title="查看真正发给千问的 system + user 全文">看发给千问的</button>
         </div>
         <div class="row"><button id="h3s2i-go" class="primary">① 生成提示词</button>
           <button id="h3s2i-imgs">② 出图</button>
@@ -435,6 +493,8 @@
     $('#h3s2i-accImport').onclick = importAcc;
     try { loadAccList(); } catch (_) {}
     $('#h3s2i-go').onclick = genPrompts;
+    $('#h3s2i-peek').onclick = peekStory;
+    $('#h3s2i-peekq').onclick = peekQwen;
     $('#h3s2i-imgs').onclick = genImages;
     $('#h3s2i-stop').onclick = () => { STOP = true; status('err', '已停止（已提交的仍会跑完）'); };
     $('#h3s2i-copy').onclick = copyPrompts;
